@@ -25,10 +25,10 @@ For larger communities, opt into PostgreSQL and Redis when you need them.
 
 ```bash
 # Run from source
-go run cmd/harmony/main.go
+go run cmd/main.go
 
 # Or build and run
-go build -o harmony-server cmd/harmony/main.go
+go build -o harmony-server cmd/main.go
 ./harmony-server
 ```
 
@@ -44,21 +44,19 @@ HARMONY_REDIS_URL=redis://localhost:6379/0 \
 
 ## Architecture
 
-Harmony is a clean monolith. Each domain module follows the **handler > service > repository** pattern, and storage backends are swappable through interfaces.
+Harmony follows a **hexagonal architecture** (ports and adapters). Domain logic has zero dependencies on frameworks or infrastructure — adapters plug in from the outside.
 
 ```
-cmd/harmony/          # Entry point and dependency wiring
+cmd/                              # Entry point, dependency wiring
 internal/
-  auth/               # JWT authentication
-  channel/            # Channel CRUD
-  chat/               # Real-time messaging
-  presence/           # Online/offline tracking
-  voice/              # SFU (Pion WebRTC)
-  ws/                 # WebSocket hub and connection management
-  storage/            # Repository interfaces + backend implementations
-    sqlite/           # Default — embedded, zero-config
-    postgres/         # Opt-in — for larger deployments
-    pubsub/           # In-memory (default) or Redis (opt-in)
+  domain/                         # Core types, interfaces (ports)
+  application/                    # Use cases / business logic (services)
+  adapter/
+    http/                         # REST handlers, router, middleware
+    repository/                   # SQLite implementation (default)
+    token/                        # JWT implementation
+  config/                         # Environment-based configuration
+migrations/                       # SQL migration files (goose)
 ```
 
 ## Tech Stack
