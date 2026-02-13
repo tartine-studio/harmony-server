@@ -37,6 +37,13 @@ func NewRouter(deps Dependencies) http.Handler {
 
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.IsAuthenticated(deps.JWTService))
+
+			r.Get("/users/me", deps.UserHandler.Me)
+			r.Patch("/users/me", deps.UserHandler.UpdateMe)
+			r.Get("/users", deps.UserHandler.GetAll)
+			r.Get("/users/{id}", deps.UserHandler.GetByID)
+			r.Patch("/users/{id}", deps.UserHandler.Update)
+			r.Delete("/users/{id}", deps.UserHandler.Delete)
 		})
 	})
 

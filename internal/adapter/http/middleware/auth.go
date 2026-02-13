@@ -1,17 +1,12 @@
 package middleware
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/tartine-studio/harmony-server/internal/domain"
 )
-
-type UserContext struct {
-	UserID string
-}
 
 func IsAuthenticated(tokenProvider domain.TokenProvider) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -34,17 +29,10 @@ func IsAuthenticated(tokenProvider domain.TokenProvider) func(http.Handler) http
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), "user", UserContext{
-				UserID: claims.UserID,
-			})
+			ctx := NewUserContext(r.Context(), claims.UserID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
-}
-
-func UserFromContext(ctx context.Context) (UserContext, bool) {
-	uc, ok := ctx.Value("user").(UserContext)
-	return uc, ok
 }
 
 func writeError(w http.ResponseWriter, status int, message, code string) {
