@@ -14,10 +14,11 @@ import (
 )
 
 type Dependencies struct {
-	AuthHandler *AuthHandler
-	UserHandler *UserHandler
-	JWTService  domain.TokenProvider
-	Logger      *zap.Logger
+	AuthHandler    *AuthHandler
+	UserHandler    *UserHandler
+	ChannelHandler *ChannelHandler
+	JWTService     domain.TokenProvider
+	Logger         *zap.Logger
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -38,12 +39,22 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.IsAuthenticated(deps.JWTService))
 
-			r.Get("/users/me", deps.UserHandler.Me)
-			r.Patch("/users/me", deps.UserHandler.UpdateMe)
-			r.Get("/users", deps.UserHandler.GetAll)
-			r.Get("/users/{id}", deps.UserHandler.GetByID)
-			r.Patch("/users/{id}", deps.UserHandler.Update)
-			r.Delete("/users/{id}", deps.UserHandler.Delete)
+			r.Route("/users", func(r chi.Router) {
+				r.Get("/me", deps.UserHandler.Me)
+				r.Patch("/me", deps.UserHandler.UpdateMe)
+				r.Get("/", deps.UserHandler.GetAll)
+				r.Get("/{id}", deps.UserHandler.GetByID)
+				r.Patch("/{id}", deps.UserHandler.Update)
+				r.Delete("/{id}", deps.UserHandler.Delete)
+			})
+
+			r.Route("/channels", func(r chi.Router) {
+				r.Get("/", deps.ChannelHandler.GetAll)
+				r.Post("/", deps.ChannelHandler.Create)
+				r.Get("/{id}", deps.ChannelHandler.GetByID)
+				r.Patch("/{id}", deps.ChannelHandler.Update)
+				r.Delete("/{id}", deps.ChannelHandler.Delete)
+			})
 		})
 	})
 

@@ -31,3 +31,29 @@ func UsersToResponse(users []domain.User) []UserResponse {
 	}
 	return res
 }
+
+type ChannelResponse struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+func ChannelToResponse(ch *domain.Channel) ChannelResponse {
+	return ChannelResponse{
+		ID:        ch.ID,
+		Name:      ch.Name,
+		Type:      string(ch.Type),
+		CreatedAt: ch.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: ch.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+func ChannelsToResponse(channels []domain.Channel) []ChannelResponse {
+	res := make([]ChannelResponse, len(channels))
+	for i := range channels {
+		res[i] = ChannelToResponse(&channels[i])
+	}
+	return res
+}

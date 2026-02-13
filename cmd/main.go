@@ -36,11 +36,16 @@ func main() {
 	userSvc := application.NewUserService(userRepo)
 	userHandler := httphandler.NewHandler(userSvc, logger)
 
+	channelRepo := repository.NewChannelRepository(db)
+	channelSvc := application.NewChannelService(channelRepo)
+	channelHandler := httphandler.NewChannelHandler(channelSvc, logger)
+
 	router := httphandler.NewRouter(httphandler.Dependencies{
-		AuthHandler: authHandler,
-		UserHandler: userHandler,
-		JWTService:  jwtSvc,
-		Logger:      logger,
+		AuthHandler:    authHandler,
+		UserHandler:    userHandler,
+		ChannelHandler: channelHandler,
+		JWTService:     jwtSvc,
+		Logger:         logger,
 	})
 
 	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
