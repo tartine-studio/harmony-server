@@ -17,6 +17,7 @@ type Dependencies struct {
 	AuthHandler    *AuthHandler
 	UserHandler    *UserHandler
 	ChannelHandler *ChannelHandler
+	MessageHandler *MessageHandler
 	JWTService     domain.TokenProvider
 	Logger         *zap.Logger
 }
@@ -54,6 +55,13 @@ func NewRouter(deps Dependencies) http.Handler {
 				r.Get("/{id}", deps.ChannelHandler.GetByID)
 				r.Patch("/{id}", deps.ChannelHandler.Update)
 				r.Delete("/{id}", deps.ChannelHandler.Delete)
+
+				r.Route("/{channelID}/messages", func(r chi.Router) {
+					r.Get("/", deps.MessageHandler.GetByChannelID)
+					r.Post("/", deps.MessageHandler.Create)
+					r.Patch("/{messageID}", deps.MessageHandler.Update)
+					r.Delete("/{messageID}", deps.MessageHandler.Delete)
+				})
 			})
 		})
 	})

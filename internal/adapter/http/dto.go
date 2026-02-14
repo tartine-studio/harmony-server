@@ -57,3 +57,31 @@ func ChannelsToResponse(channels []domain.Channel) []ChannelResponse {
 	}
 	return res
 }
+
+type MessageResponse struct {
+	ID        string `json:"id"`
+	UserID    string `json:"userId"`
+	ChannelID string `json:"channelId"`
+	Content   string `json:"content"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+func MessageToResponse(m *domain.Message) MessageResponse {
+	return MessageResponse{
+		ID:        m.ID,
+		UserID:    m.UserID,
+		ChannelID: m.ChannelID,
+		Content:   m.Content,
+		CreatedAt: m.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: m.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+func MessagesToResponse(messages []domain.Message) []MessageResponse {
+	res := make([]MessageResponse, len(messages))
+	for i := range messages {
+		res[i] = MessageToResponse(&messages[i])
+	}
+	return res
+}

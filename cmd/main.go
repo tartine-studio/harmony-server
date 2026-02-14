@@ -40,10 +40,15 @@ func main() {
 	channelSvc := application.NewChannelService(channelRepo)
 	channelHandler := httphandler.NewChannelHandler(channelSvc, logger)
 
+	messageRepo := repository.NewMessageRepository(db)
+	messageSvc := application.NewMessageService(messageRepo, channelRepo)
+	messageHandler := httphandler.NewMessageHandler(messageSvc, logger)
+
 	router := httphandler.NewRouter(httphandler.Dependencies{
 		AuthHandler:    authHandler,
 		UserHandler:    userHandler,
 		ChannelHandler: channelHandler,
+		MessageHandler: messageHandler,
 		JWTService:     jwtSvc,
 		Logger:         logger,
 	})
