@@ -1,0 +1,22 @@
+meta {
+  name: Patch
+  type: http
+  seq: 3
+}
+
+patch {
+  url: http://localhost:8080/api/channels/23beed6d-223a-4e00-8ad4-d173523165ef
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "test channel 2"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

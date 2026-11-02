@@ -1,0 +1,19 @@
+meta {
+  name: websocket
+  type: ws
+  seq: 5
+}
+
+ws {
+  url: ws://localhost:8080/api/ws?token={{accessToken}}
+  body: ws
+  auth: inherit
+}
+
+body:ws {
+  name: message 1
+  type: json
+  content: '''
+    {}
+  '''
+}

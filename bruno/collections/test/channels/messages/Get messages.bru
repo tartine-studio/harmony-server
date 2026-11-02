@@ -1,0 +1,20 @@
+meta {
+  name: Get messages
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://localhost:8080/api/channels/23beed6d-223a-4e00-8ad4-d173523165ef/messages
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

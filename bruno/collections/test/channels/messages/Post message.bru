@@ -1,0 +1,26 @@
+meta {
+  name: Post message
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://localhost:8080/api/channels/23beed6d-223a-4e00-8ad4-d173523165ef/messages
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "content": "test from 2"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

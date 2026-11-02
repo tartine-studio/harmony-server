@@ -1,0 +1,28 @@
+meta {
+  name: login
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://localhost:8080/api/auth/login
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "email": "test2@test.com",
+    "password": "12345678"
+  }
+}
+
+vars:post-response {
+  accessToken: res.accessToken
+  refreshToken: res.refreshToken
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

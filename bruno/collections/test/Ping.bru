@@ -1,0 +1,16 @@
+meta {
+  name: Ping
+  type: http
+  seq: 3
+}
+
+get {
+  url: http://localhost:8080/api/ping
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

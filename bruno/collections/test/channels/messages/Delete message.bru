@@ -1,0 +1,16 @@
+meta {
+  name: Delete message
+  type: http
+  seq: 3
+}
+
+delete {
+  url: http://localhost:8080/api/channels/23beed6d-223a-4e00-8ad4-d173523165ef/messages/108d1b48-83e7-4a04-b494-66c642352d89
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
