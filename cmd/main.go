@@ -10,6 +10,7 @@ import (
 
 	httphandler "github.com/tartine-studio/harmony-server/internal/adapter/http"
 	"github.com/tartine-studio/harmony-server/internal/adapter/repository"
+	"github.com/tartine-studio/harmony-server/internal/adapter/sfu"
 	"github.com/tartine-studio/harmony-server/internal/adapter/token"
 	wshandler "github.com/tartine-studio/harmony-server/internal/adapter/ws"
 	"github.com/tartine-studio/harmony-server/internal/application"
@@ -42,7 +43,14 @@ func main() {
 	go hub.Run()
 
 	channelRepo := repository.NewChannelRepository(db)
-	voiceSvc := application.NewVoiceService(channelRepo, hub, cfg.VoiceMaxParticipants)
+	voiceMedia, err := sfu.New(sfu.Config{UDPPort: cfg.VoiceUDPPort, PublicIP: cfg.PublicIP}, hub, logger)
+	if err != nil {
+		logger.Fatal("failed to start voice server", zap.Error(err))
+	}
+	defer voiceMedia.Close()
+	logger.Info("voice server listening", zap.Int("udpPort", cfg.VoiceUDPPort), zap.String("publicIP", cfg.PublicIP))
+	voiceSvc := application.NewVoiceService(channelRepo, hub, voiceMedia, cfg.VoiceMaxParticipants)
+	voiceMedia.SetEvents(voiceSvc)
 	channelSvc := application.NewChannelService(channelRepo, voiceSvc)
 	channelHandler := httphandler.NewChannelHandler(channelSvc, logger)
 

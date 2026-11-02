@@ -11,6 +11,17 @@ type updateVoiceStateData struct {
 	Deafened *bool `json:"deafened"`
 }
 
+type voiceSDPData struct {
+	SDP string `json:"sdp"`
+}
+
+type voiceCandidateData struct {
+	Candidate        string  `json:"candidate"`
+	SDPMid           *string `json:"sdpMid"`
+	SDPMLineIndex    *uint16 `json:"sdpMLineIndex"`
+	UsernameFragment *string `json:"usernameFragment"`
+}
+
 type voiceStateEvent struct {
 	UserID    string  `json:"userId"`
 	ChannelID *string `json:"channelId"` // null when the user left voice
@@ -52,6 +63,11 @@ func voiceStateSnapshot(states []domain.VoiceState) []byte {
 // PublishVoiceState implements domain.VoiceNotifier.
 func (h *Hub) PublishVoiceState(state domain.VoiceState) {
 	h.BroadcastJSON(envelope("voiceStateUpdate", toVoiceStateEvent(state)))
+}
+
+// SendVoiceOffer implements domain.VoiceSignaler.
+func (h *Hub) SendVoiceOffer(sessionID, sdp string) {
+	h.SendToSession(sessionID, envelope("voiceOffer", voiceSDPData{SDP: sdp}))
 }
 
 // NotifyVoiceDisconnected implements domain.VoiceNotifier.

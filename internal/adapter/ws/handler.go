@@ -159,6 +159,10 @@ func (h *Handler) dispatch(client *Client, raw []byte) {
 		h.voiceSvc.Leave(client.userID, client.id)
 	case "updateVoiceState":
 		h.handleUpdateVoiceState(client, env)
+	case "voiceAnswer":
+		h.handleVoiceAnswer(client, env)
+	case "voiceCandidate":
+		h.handleVoiceCandidate(client, env)
 	case "activity":
 		// Activity heartbeat: the Touch above is all it needs.
 	default:
@@ -297,6 +301,44 @@ func (h *Handler) handleUpdateVoiceState(client *Client, env Envelope) {
 		}
 		h.logger.Error("failed to update voice state", zap.Error(err))
 		h.sendError(client, env.RequestID, "failed to update voice state", "INTERNAL_ERROR")
+	}
+}
+
+func (h *Handler) handleVoiceAnswer(client *Client, env Envelope) {
+	var data voiceSDPData
+	if err := json.Unmarshal(env.Data, &data); err != nil || data.SDP == "" {
+		h.sendError(client, env.RequestID, "sdp is required", "VALIDATION_ERROR")
+		return
+	}
+	h.voiceSignalingResult(client, env, h.voiceSvc.HandleAnswer(client.userID, client.id, data.SDP))
+}
+
+func (h *Handler) handleVoiceCandidate(client *Client, env Envelope) {
+	var data voiceCandidateData
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		h.sendError(client, env.RequestID, "invalid candidate", "VALIDATION_ERROR")
+		return
+	}
+	err := h.voiceSvc.AddICECandidate(client.userID, client.id, domain.ICECandidate{
+		Candidate:        data.Candidate,
+		SDPMid:           data.SDPMid,
+		SDPMLineIndex:    data.SDPMLineIndex,
+		UsernameFragment: data.UsernameFragment,
+	})
+	h.voiceSignalingResult(client, env, err)
+}
+
+func (h *Handler) voiceSignalingResult(client *Client, env Envelope, err error) {
+	switch {
+	case err == nil:
+	case errors.Is(err, application.ErrNotInVoice):
+		h.sendError(client, env.RequestID, "not in a voice channel", "NOT_IN_VOICE")
+	case errors.Is(err, domain.ErrInvalidSignaling):
+		h.logger.Debug("invalid voice signaling", zap.String("userID", client.userID), zap.Error(err))
+		h.sendError(client, env.RequestID, "invalid signaling", "INVALID_SIGNALING")
+	default:
+		h.logger.Error("voice signaling failed", zap.Error(err))
+		h.sendError(client, env.RequestID, "voice signaling failed", "INTERNAL_ERROR")
 	}
 }
 
