@@ -28,6 +28,12 @@ type voiceStateEvent struct {
 	Muted     bool    `json:"muted"`     // effective: true when deafened
 	SelfMuted bool    `json:"selfMuted"`
 	Deafened  bool    `json:"deafened"`
+	Speaking  bool    `json:"speaking"`
+}
+
+type voiceSpeakingEvent struct {
+	UserID   string `json:"userId"`
+	Speaking bool   `json:"speaking"`
 }
 
 type voiceStateSnapshotEvent struct {
@@ -44,6 +50,7 @@ func toVoiceStateEvent(s domain.VoiceState) voiceStateEvent {
 		Muted:     s.Muted(),
 		SelfMuted: s.SelfMuted,
 		Deafened:  s.Deafened,
+		Speaking:  s.Speaking,
 	}
 	if s.ChannelID != "" {
 		ch := s.ChannelID
@@ -63,6 +70,11 @@ func voiceStateSnapshot(states []domain.VoiceState) []byte {
 // PublishVoiceState implements domain.VoiceNotifier.
 func (h *Hub) PublishVoiceState(state domain.VoiceState) {
 	h.BroadcastJSON(envelope("voiceStateUpdate", toVoiceStateEvent(state)))
+}
+
+// PublishSpeaking implements domain.VoiceNotifier.
+func (h *Hub) PublishSpeaking(userID string, speaking bool) {
+	h.BroadcastJSON(envelope("voiceSpeaking", voiceSpeakingEvent{UserID: userID, Speaking: speaking}))
 }
 
 // SendVoiceOffer implements domain.VoiceSignaler.

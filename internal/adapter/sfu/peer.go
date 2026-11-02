@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pion/rtp"
+	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v4"
 	"go.uber.org/zap"
 
@@ -39,6 +41,9 @@ type peer struct {
 
 	connectTimer *time.Timer
 	deafened     atomic.Bool // deafened peers receive nothing
+
+	speaking   atomic.Bool
+	lastSpeech atomic.Int64 // unix nanos of the last packet above the speaking threshold
 
 	// fanout lists where this peer's audio goes. Copy-on-write, only mutated
 	// under sfu.mu; read lock-free on every packet.
@@ -99,11 +104,17 @@ func (s *SFU) newPeer(sessionID, userID, channelID string, deafened bool) (*peer
 
 // forward copies every RTP packet from the user's mic to each subscriber that
 // is not deafened.
-func (p *peer) forward(remote *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+func (p *peer) forward(remote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 	if remote.Kind() != webrtc.RTPCodecTypeAudio {
 		return
 	}
 	p.sfu.logger.Info("voice track started", zap.String("session", p.sessionID), zap.String("user", p.userID))
+
+	levelExtID := audioLevelExtID(receiver)
+	if levelExtID == 0 {
+		p.sfu.logger.Warn("client did not negotiate the audio level extension, speaking detection disabled",
+			zap.String("session", p.sessionID))
+	}
 
 	for {
 		pkt, _, err := remote.ReadRTP()
@@ -112,6 +123,9 @@ func (p *peer) forward(remote *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 				p.sfu.logger.Debug("voice track ended", zap.String("session", p.sessionID), zap.Error(err))
 			}
 			return
+		}
+		if levelExtID != 0 {
+			p.detectSpeech(pkt, levelExtID)
 		}
 		for _, t := range *p.fanout.Load() {
 			if t.dst.deafened.Load() {
@@ -122,6 +136,30 @@ func (p *peer) forward(remote *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 			}
 		}
 	}
+}
+
+func (p *peer) detectSpeech(pkt *rtp.Packet, extID uint8) {
+	raw := pkt.GetExtension(extID)
+	if raw == nil {
+		return
+	}
+	var level rtp.AudioLevelExtension
+	if err := level.Unmarshal(raw); err != nil || level.Level > speakingThreshold {
+		return
+	}
+	p.lastSpeech.Store(time.Now().UnixNano())
+	if p.speaking.CompareAndSwap(false, true) {
+		p.sfu.emitSpeaking(p, true)
+	}
+}
+
+func audioLevelExtID(receiver *webrtc.RTPReceiver) uint8 {
+	for _, ext := range receiver.GetParameters().HeaderExtensions {
+		if ext.URI == sdp.AudioLevelURI {
+			return uint8(ext.ID)
+		}
+	}
+	return 0
 }
 
 // subscribe makes p receive src's audio (effective at the next negotiation).

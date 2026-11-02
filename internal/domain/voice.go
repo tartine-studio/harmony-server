@@ -10,6 +10,7 @@ type VoiceState struct {
 	ChannelID string // empty when the user just left voice
 	SelfMuted bool
 	Deafened  bool
+	Speaking  bool // server-detected from the RTP audio level; never true while muted
 }
 
 // Muted is the effective mute state: deafened users are always muted.
@@ -32,6 +33,8 @@ type VoiceNotifier interface {
 	PublishVoiceState(state VoiceState)
 	// NotifyVoiceDisconnected tells a single session it was removed from voice.
 	NotifyVoiceDisconnected(sessionID string, reason VoiceDisconnectReason)
+	// PublishSpeaking tells every client a user started or stopped speaking.
+	PublishSpeaking(userID string, speaking bool)
 }
 
 // ErrInvalidSignaling is returned for SDP/ICE messages the media plane rejects
@@ -70,4 +73,7 @@ type VoiceMediaEvents interface {
 	// PeerFailed reports a peer that failed or never connected; it has already
 	// been removed from the media plane.
 	PeerFailed(sessionID string)
+	// SpeakingChanged reports a speaking transition detected on the session's
+	// audio. Events for a session are delivered in order.
+	SpeakingChanged(sessionID string, speaking bool)
 }

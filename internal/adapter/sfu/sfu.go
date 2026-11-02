@@ -22,6 +22,18 @@ import (
 const (
 	defaultConnectTimeout = 30 * time.Second
 	gatheringTimeout      = 2 * time.Second
+
+	// speakingThreshold is the audio level (-dBov, lower is louder) at or
+	// under which a packet counts as speech.
+	speakingThreshold = 50
+	// speakingHold is how long without speech before "stopped speaking", so
+	// short pauses between words don't flicker the indicator.
+	speakingHold = 300 * time.Millisecond
+	// speakingCheckInterval drives the stop detection, which also covers a
+	// client that stops sending packets entirely.
+	speakingCheckInterval = 50 * time.Millisecond
+
+	eventQueueSize = 1024
 )
 
 // opusCodec is the only codec negotiated.
@@ -48,6 +60,12 @@ type SFU struct {
 	events         domain.VoiceMediaEvents
 	logger         *zap.Logger
 	connectTimeout time.Duration
+
+	// eventQueue delivers events to the application one at a time, in order
+	// (e.g. speaking on/off must not be reordered).
+	eventQueue chan func()
+	done       chan struct{}
+	closeOnce  sync.Once
 
 	mu    sync.Mutex
 	peers map[string]*peer            // by session ID
@@ -97,15 +115,71 @@ func New(cfg Config, signaler domain.VoiceSignaler, logger *zap.Logger) (*SFU, e
 		timeout = defaultConnectTimeout
 	}
 
-	return &SFU{
+	s := &SFU{
 		api:            webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithSettingEngine(se), webrtc.WithInterceptorRegistry(registry)),
 		udpConn:        udpConn,
 		signaler:       signaler,
 		logger:         logger,
 		connectTimeout: timeout,
+		eventQueue:     make(chan func(), eventQueueSize),
+		done:           make(chan struct{}),
 		peers:          make(map[string]*peer),
 		rooms:          make(map[string]map[string]*peer),
-	}, nil
+	}
+	go s.dispatchEvents()
+	go s.watchSpeaking()
+	return s, nil
+}
+
+func (s *SFU) dispatchEvents() {
+	for {
+		select {
+		case <-s.done:
+			return
+		case fn := <-s.eventQueue:
+			fn()
+		}
+	}
+}
+
+// watchSpeaking turns off the speaking flag of peers that went quiet.
+func (s *SFU) watchSpeaking() {
+	ticker := time.NewTicker(speakingCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-ticker.C:
+		}
+		cutoff := time.Now().Add(-speakingHold).UnixNano()
+		s.mu.Lock()
+		for _, p := range s.peers {
+			if p.lastSpeech.Load() < cutoff && p.speaking.CompareAndSwap(true, false) {
+				s.emitSpeaking(p, false)
+			}
+		}
+		s.mu.Unlock()
+	}
+}
+
+// emitSpeaking queues a speaking transition. Dropped (not blocking the media
+// path) if the queue is full; the next transition corrects the state.
+func (s *SFU) emitSpeaking(p *peer, speaking bool) {
+	if s.events == nil {
+		return
+	}
+	event := func() {
+		// Ignore events from a peer that was replaced or removed meanwhile.
+		if s.peer(p.sessionID) == p {
+			s.events.SpeakingChanged(p.sessionID, speaking)
+		}
+	}
+	select {
+	case s.eventQueue <- event:
+	default:
+		s.logger.Warn("voice event queue full, dropping speaking event", zap.String("session", p.sessionID))
+	}
 }
 
 // SetEvents sets the application callbacks. Must be called before use (it
@@ -116,6 +190,7 @@ func (s *SFU) SetEvents(events domain.VoiceMediaEvents) {
 
 // Close tears down every peer and releases the UDP port.
 func (s *SFU) Close() error {
+	s.closeOnce.Do(func() { close(s.done) })
 	s.mu.Lock()
 	peers := make([]*peer, 0, len(s.peers))
 	for _, p := range s.peers {
@@ -258,7 +333,10 @@ func (s *SFU) fail(p *peer) {
 		go q.negotiate()
 	}
 	if s.events != nil {
-		go s.events.PeerFailed(p.sessionID)
+		select {
+		case s.eventQueue <- func() { s.events.PeerFailed(p.sessionID) }:
+		case <-s.done:
+		}
 	}
 }
 

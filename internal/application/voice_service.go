@@ -124,8 +124,15 @@ func (s *VoiceService) SetState(userID, sessionID string, selfMuted, deafened *b
 	if next.Deafened != cur.Deafened {
 		s.media.SetDeafened(sessionID, next.Deafened)
 	}
+	stoppedSpeaking := next.Muted() && next.Speaking
+	if stoppedSpeaking {
+		next.Speaking = false
+	}
 	*cur = next
 	s.notifier.PublishVoiceState(next)
+	if stoppedSpeaking {
+		s.notifier.PublishSpeaking(userID, false)
+	}
 	return nil
 }
 
@@ -151,13 +158,33 @@ func (s *VoiceService) PeerFailed(sessionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if st := s.bySessionLocked(sessionID); st != nil {
+		s.notifier.NotifyVoiceDisconnected(sessionID, domain.VoiceDisconnectConnectionFailed)
+		s.removeLocked(st)
+	}
+}
+
+// SpeakingChanged implements domain.VoiceMediaEvents. Muted users are never
+// reported as speaking, even if their client keeps sending audio.
+func (s *VoiceService) SpeakingChanged(sessionID string, speaking bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	st := s.bySessionLocked(sessionID)
+	if st == nil || (speaking && st.Muted()) || st.Speaking == speaking {
+		return
+	}
+	st.Speaking = speaking
+	s.notifier.PublishSpeaking(st.UserID, speaking)
+}
+
+func (s *VoiceService) bySessionLocked(sessionID string) *domain.VoiceState {
 	for _, st := range s.byUser {
 		if st.SessionID == sessionID {
-			s.notifier.NotifyVoiceDisconnected(sessionID, domain.VoiceDisconnectConnectionFailed)
-			s.removeLocked(st)
-			return
+			return st
 		}
 	}
+	return nil
 }
 
 func (s *VoiceService) isCurrentSession(userID, sessionID string) bool {
