@@ -18,6 +18,7 @@ type Dependencies struct {
 	UserHandler    *UserHandler
 	ChannelHandler *ChannelHandler
 	MessageHandler *MessageHandler
+	WsHandler      http.Handler
 	JWTService     domain.TokenProvider
 	Logger         *zap.Logger
 }
@@ -36,6 +37,8 @@ func NewRouter(deps Dependencies) http.Handler {
 			r.Post("/login", deps.AuthHandler.Login)
 			r.Post("/refresh", deps.AuthHandler.Refresh)
 		})
+
+		r.Get("/ws", deps.WsHandler.ServeHTTP)
 
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.IsAuthenticated(deps.JWTService))

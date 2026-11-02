@@ -10,6 +10,7 @@ import (
 	httphandler "github.com/tartine-studio/harmony-server/internal/adapter/http"
 	"github.com/tartine-studio/harmony-server/internal/adapter/repository"
 	"github.com/tartine-studio/harmony-server/internal/adapter/token"
+	wshandler "github.com/tartine-studio/harmony-server/internal/adapter/ws"
 	"github.com/tartine-studio/harmony-server/internal/application"
 	"github.com/tartine-studio/harmony-server/internal/config"
 )
@@ -44,11 +45,16 @@ func main() {
 	messageSvc := application.NewMessageService(messageRepo, channelRepo)
 	messageHandler := httphandler.NewMessageHandler(messageSvc, logger)
 
+	hub := wshandler.NewHub(logger)
+	go hub.Run()
+	wsHandler := wshandler.NewHandler(hub, messageSvc, jwtSvc, logger)
+
 	router := httphandler.NewRouter(httphandler.Dependencies{
 		AuthHandler:    authHandler,
 		UserHandler:    userHandler,
 		ChannelHandler: channelHandler,
 		MessageHandler: messageHandler,
+		WsHandler:      wsHandler,
 		JWTService:     jwtSvc,
 		Logger:         logger,
 	})
