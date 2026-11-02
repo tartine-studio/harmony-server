@@ -10,6 +10,7 @@ type User struct {
 	Username  string    `json:"username"`
 	Email     string    `json:"email"`
 	Password  string    `json:"-"`
+	Invisible bool      `json:"invisible"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -20,5 +21,6 @@ type UserRepository interface {
 	GetByID(ctx context.Context, id string) (*User, error)
 	GetByEmail(ctx context.Context, email string) (*User, error)
 	Update(ctx context.Context, user *User) error
+	SetInvisible(ctx context.Context, id string, invisible bool) error
 	Delete(ctx context.Context, id string) error
 }

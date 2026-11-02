@@ -63,18 +63,20 @@ var upgrader = websocket.Upgrader{
 }
 
 type Handler struct {
-	hub        *Hub
-	messageSvc *application.MessageService
-	tokenSvc   domain.TokenProvider
-	logger     *zap.Logger
+	hub         *Hub
+	messageSvc  *application.MessageService
+	presenceSvc *application.PresenceService
+	tokenSvc    domain.TokenProvider
+	logger      *zap.Logger
 }
 
-func NewHandler(hub *Hub, messageSvc *application.MessageService, tokenSvc domain.TokenProvider, logger *zap.Logger) *Handler {
+func NewHandler(hub *Hub, messageSvc *application.MessageService, presenceSvc *application.PresenceService, tokenSvc domain.TokenProvider, logger *zap.Logger) *Handler {
 	return &Handler{
-		hub:        hub,
-		messageSvc: messageSvc,
-		tokenSvc:   tokenSvc,
-		logger:     logger,
+		hub:         hub,
+		messageSvc:  messageSvc,
+		presenceSvc: presenceSvc,
+		tokenSvc:    tokenSvc,
+		logger:      logger,
 	}
 }
 
@@ -91,17 +93,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.presenceSvc.Connect(r.Context(), claims.UserID); err != nil {
+		if errors.Is(err, application.ErrUserNotFound) {
+			http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+			return
+		}
+		h.logger.Error("presence connect failed", zap.Error(err))
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.logger.Error("websocket upgrade failed", zap.Error(err))
+		h.presenceSvc.Disconnect(claims.UserID)
 		return
 	}
 
 	client := NewClient(h.hub, conn, claims.UserID, h.logger)
+	// Queue the snapshot before registering so later broadcasts arrive after it.
+	client.SendJSON(presenceSnapshotFor(client.userID, h.presenceSvc.Snapshot(client.userID)))
 	h.hub.register <- client
 
 	go client.writePump()
-	go client.readPump(h.dispatch)
+	go func() {
+		client.readPump(h.dispatch)
+		h.presenceSvc.Disconnect(client.userID)
+	}()
 }
 
 func extractBearerToken(r *http.Request) string {
@@ -113,6 +131,9 @@ func extractBearerToken(r *http.Request) string {
 }
 
 func (h *Handler) dispatch(client *Client, raw []byte) {
+	// Any frame from the client counts as user activity (keeps them out of idle).
+	h.presenceSvc.Touch(client.userID)
+
 	var env Envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
 		h.sendError(client, "", "invalid message format", "PARSE_ERROR")
@@ -126,6 +147,10 @@ func (h *Handler) dispatch(client *Client, raw []byte) {
 		h.handleEditMessage(client, env)
 	case "deleteMessage":
 		h.handleDeleteMessage(client, env)
+	case "presenceUpdate":
+		h.handlePresenceUpdate(client, env)
+	case "activity":
+		// Activity heartbeat: the Touch above is all it needs.
 	default:
 		h.sendError(client, env.RequestID, "unknown event type", "UNKNOWN_EVENT")
 	}
@@ -211,6 +236,19 @@ func (h *Handler) handleDeleteMessage(client *Client, env Envelope) {
 	}
 
 	h.broadcastEvent("messageDeleted", messageDeletedEvent{MessageID: data.MessageID})
+}
+
+func (h *Handler) handlePresenceUpdate(client *Client, env Envelope) {
+	var data presenceUpdateData
+	if err := json.Unmarshal(env.Data, &data); err != nil || data.Invisible == nil {
+		h.sendError(client, env.RequestID, "invisible is required", "VALIDATION_ERROR")
+		return
+	}
+
+	if err := h.presenceSvc.SetInvisible(context.Background(), client.userID, *data.Invisible); err != nil {
+		h.logger.Error("failed to update presence via ws", zap.Error(err))
+		h.sendError(client, env.RequestID, "failed to update presence", "INTERNAL_ERROR")
+	}
 }
 
 func (h *Handler) broadcastEvent(eventType string, data any) {

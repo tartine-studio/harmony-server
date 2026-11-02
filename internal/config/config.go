@@ -18,6 +18,9 @@ type Config struct {
 	JWTSecret     string        `env:"HARMONY_JWT_SECRET"`
 	JWTAccessTTL  time.Duration `env:"HARMONY_JWT_ACCESS_TTL"  envDefault:"15m"`
 	JWTRefreshTTL time.Duration `env:"HARMONY_JWT_REFRESH_TTL" envDefault:"168h"`
+
+	PresenceIdleTimeout  time.Duration `env:"HARMONY_PRESENCE_IDLE_TIMEOUT"   envDefault:"5m"`
+	PresenceOfflineGrace time.Duration `env:"HARMONY_PRESENCE_OFFLINE_GRACE"  envDefault:"10s"`
 }
 
 func Load() (Config, error) {

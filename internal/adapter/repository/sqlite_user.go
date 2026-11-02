@@ -33,19 +33,19 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 
 func (r *UserRepository) GetByID(ctx context.Context, id string) (*domain.User, error) {
 	return r.scanUser(r.db.QueryRowContext(ctx,
-		`SELECT id, username, email, password, created_at, updated_at FROM users WHERE id = ?`, id,
+		`SELECT id, username, email, password, invisible, created_at, updated_at FROM users WHERE id = ?`, id,
 	))
 }
 
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
 	return r.scanUser(r.db.QueryRowContext(ctx,
-		`SELECT id, username, email, password, created_at, updated_at FROM users WHERE email = ?`, email,
+		`SELECT id, username, email, password, invisible, created_at, updated_at FROM users WHERE email = ?`, email,
 	))
 }
 
 func (r *UserRepository) GetAll(ctx context.Context) ([]domain.User, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, username, email, password, created_at, updated_at FROM users`,
+		`SELECT id, username, email, password, invisible, created_at, updated_at FROM users`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get all users: %w", err)
@@ -56,7 +56,7 @@ func (r *UserRepository) GetAll(ctx context.Context) ([]domain.User, error) {
 	for rows.Next() {
 		var u domain.User
 		var createdAt, updatedAt string
-		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Password, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Password, &u.Invisible, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		u.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
@@ -81,6 +81,17 @@ func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
 	return nil
 }
 
+func (r *UserRepository) SetInvisible(ctx context.Context, id string, invisible bool) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE users SET invisible = ?, updated_at = ? WHERE id = ?`,
+		invisible, time.Now().UTC().Format(time.RFC3339), id,
+	)
+	if err != nil {
+		return fmt.Errorf("set user invisible: %w", err)
+	}
+	return nil
+}
+
 func (r *UserRepository) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
 	if err != nil {
@@ -93,7 +104,7 @@ func (r *UserRepository) scanUser(row *sql.Row) (*domain.User, error) {
 	var u domain.User
 	var createdAt, updatedAt string
 
-	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.Password, &createdAt, &updatedAt)
+	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.Password, &u.Invisible, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

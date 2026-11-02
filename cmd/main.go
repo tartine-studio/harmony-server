@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -47,7 +48,9 @@ func main() {
 
 	hub := wshandler.NewHub(logger)
 	go hub.Run()
-	wsHandler := wshandler.NewHandler(hub, messageSvc, jwtSvc, logger)
+	presenceSvc := application.NewPresenceService(userRepo, hub, cfg.PresenceIdleTimeout, cfg.PresenceOfflineGrace)
+	go presenceSvc.Run(context.Background())
+	wsHandler := wshandler.NewHandler(hub, messageSvc, presenceSvc, jwtSvc, logger)
 
 	router := httphandler.NewRouter(httphandler.Dependencies{
 		AuthHandler:    authHandler,
