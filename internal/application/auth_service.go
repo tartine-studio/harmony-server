@@ -18,6 +18,10 @@ var (
 	ErrInvalidToken       = errors.New("invalid or expired refresh token")
 )
 
+// BcryptCost is the password hashing cost. Tests lower it to keep
+// register/login fast; never change it in production code.
+var BcryptCost = 12
+
 type AuthService struct {
 	repo          domain.UserRepository
 	tokenProvider domain.TokenProvider
@@ -36,7 +40,7 @@ func (s *AuthService) Register(ctx context.Context, name, email, password string
 		return nil, ErrEmailTaken
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), BcryptCost)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
 	}

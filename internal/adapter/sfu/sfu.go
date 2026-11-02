@@ -182,6 +182,12 @@ func (s *SFU) emitSpeaking(p *peer, speaking bool) {
 	}
 }
 
+// UDPPort returns the UDP port actually bound for voice traffic (useful when
+// Config.UDPPort is 0 and the OS picks one).
+func (s *SFU) UDPPort() int {
+	return s.udpConn.LocalAddr().(*net.UDPAddr).Port
+}
+
 // SetEvents sets the application callbacks. Must be called before use (it
 // breaks the construction cycle between the SFU and the voice service).
 func (s *SFU) SetEvents(events domain.VoiceMediaEvents) {

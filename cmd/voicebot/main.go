@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,41 +20,22 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/pion/interceptor"
-	"github.com/pion/rtp"
-	"github.com/pion/sdp/v3"
-	"github.com/pion/webrtc/v4"
+
+	"github.com/tartine-studio/harmony-server/internal/voiceclient"
 )
 
-var debugSDP bool
-
-// opusSilence is a valid 20ms Opus frame. The SFU never decodes audio, so its
-// content does not matter; only the RTP flow and the audio level do.
-var opusSilence = []byte{0xf8, 0xff, 0xfe}
-
 type bot struct {
-	server   string
-	token    string
-	channel  string
-	speak    bool
-	level    uint8
-	talk     time.Duration
-	pause    time.Duration
-	namesMu  sync.Mutex
-	names    map[string]string
-	ws       *websocket.Conn
-	wsMu     sync.Mutex
-	pc       *webrtc.PeerConnection
-	mic      *webrtc.TrackLocalStaticRTP // nil unless -speak
-	micAdded bool                        // only touched by readLoop
-	answered atomic.Bool
-	pendMu   sync.Mutex
-	pending  []webrtc.ICECandidateInit
-	counts   sync.Map // userID -> *atomic.Int64
+	server  string
+	token   string
+	channel string
+	namesMu sync.Mutex
+	names   map[string]string
+	ws      *websocket.Conn
+	wsMu    sync.Mutex
+	voice   *voiceclient.Client
 }
 
 func main() {
@@ -86,21 +68,16 @@ func main() {
 		log.Fatalf("login failed (use -register for a new account): %v", err)
 	}
 
-	debugSDP = *showSDP
-	b := &bot{server: *server, token: tokens.AccessToken, speak: *speak, level: uint8(*level), talk: *talk, pause: *pause, names: map[string]string{}}
+	b := &bot{server: *server, token: tokens.AccessToken, names: map[string]string{}}
 	b.loadNames()
 	b.channel = b.resolveChannel(*channel, *create)
 
-	if err := b.newPeerConnection(); err != nil {
+	opts := voiceclient.Options{Speak: *speak, Level: uint8(*level), Logf: log.Printf, DebugSDP: *showSDP}
+	voice, err := voiceclient.New(b.send, opts)
+	if err != nil {
 		log.Fatal(err)
 	}
-	if b.speak {
-		mic, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2}, "mic", "voicebot")
-		if err != nil {
-			log.Fatal(err)
-		}
-		b.mic = mic
-	}
+	b.voice = voice
 	if err := b.connect(); err != nil {
 		log.Fatal(err)
 	}
@@ -119,8 +96,13 @@ func main() {
 	}
 
 	go b.report()
-	if b.speak {
-		go b.sendAudio()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if *speak {
+		go voice.SendAudio(ctx)
+		if *talk > 0 {
+			go burst(ctx, voice, uint8(*level), *talk, *pause)
+		}
 	}
 
 	stop := make(chan os.Signal, 1)
@@ -136,7 +118,25 @@ func main() {
 	b.send("leaveVoice", map[string]string{})
 	time.Sleep(200 * time.Millisecond)
 	b.ws.Close()
-	b.pc.Close()
+	b.voice.Close()
+}
+
+// burst alternates talking (level) and silence: talk for talk, pause for pause.
+func burst(ctx context.Context, voice *voiceclient.Client, level uint8, talk, pause time.Duration) {
+	for {
+		voice.SetLevel(level)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(talk):
+		}
+		voice.SetLevel(voiceclient.LevelSilent)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(pause):
+		}
+	}
 }
 
 func (b *bot) connect() error {
@@ -171,7 +171,7 @@ func (b *bot) readLoop() {
 		case "voiceOffer":
 			var d struct{ SDP string }
 			json.Unmarshal(env.Data, &d)
-			if err := b.handleOffer(d.SDP); err != nil {
+			if err := b.voice.HandleOffer(d.SDP); err != nil {
 				log.Printf("handle offer: %v", err)
 			}
 		case "voiceStateUpdate", "voiceSpeaking", "voiceDisconnected", "voiceStateSnapshot", "error":
@@ -180,145 +180,12 @@ func (b *bot) readLoop() {
 	}
 }
 
-func (b *bot) handleOffer(offer string) error {
-	if debugSDP {
-		log.Printf("offer:\n%s", offer)
-	}
-	if err := b.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offer}); err != nil {
-		return fmt.Errorf("set remote: %w", err)
-	}
-	if b.mic != nil && !b.micAdded {
-		// Attaches to the recvonly slot the server offered for our mic.
-		if _, err := b.pc.AddTrack(b.mic); err != nil {
-			return fmt.Errorf("add mic: %w", err)
-		}
-		b.micAdded = true
-	}
-	answer, err := b.pc.CreateAnswer(nil)
-	if err != nil {
-		return fmt.Errorf("create answer: %w", err)
-	}
-	if err := b.pc.SetLocalDescription(answer); err != nil {
-		return fmt.Errorf("set local: %w", err)
-	}
-	// The answer must reach the server before our trickled candidates.
-	b.send("voiceAnswer", map[string]string{"sdp": b.pc.LocalDescription().SDP})
-	b.pendMu.Lock()
-	b.answered.Store(true)
-	for _, c := range b.pending {
-		b.send("voiceCandidate", c)
-	}
-	b.pending = nil
-	b.pendMu.Unlock()
-	return nil
-}
-
-func (b *bot) newPeerConnection() error {
-	m := &webrtc.MediaEngine{}
-	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
-		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus, ClockRate: 48000, Channels: 2, SDPFmtpLine: "minptime=10;useinbandfec=1"},
-		PayloadType:        111,
-	}, webrtc.RTPCodecTypeAudio); err != nil {
-		return err
-	}
-	if err := m.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: sdp.AudioLevelURI}, webrtc.RTPCodecTypeAudio); err != nil {
-		return err
-	}
-	registry := &interceptor.Registry{}
-	if err := webrtc.RegisterDefaultInterceptors(m, registry); err != nil {
-		return err
-	}
-	pc, err := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(registry)).NewPeerConnection(webrtc.Configuration{})
-	if err != nil {
-		return err
-	}
-	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
-		if c == nil {
-			return
-		}
-		init := c.ToJSON()
-		if debugSDP {
-			log.Printf("local candidate: %s", init.Candidate)
-		}
-		b.pendMu.Lock()
-		defer b.pendMu.Unlock()
-		if b.answered.Load() {
-			b.send("voiceCandidate", init)
-		} else {
-			b.pending = append(b.pending, init)
-		}
-	})
-	pc.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
-		log.Printf("peer connection: %s", s)
-	})
-	pc.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
-		userID := t.StreamID()
-		log.Printf("receiving audio track from %s", b.name(userID))
-		n, _ := b.counts.LoadOrStore(userID, &atomic.Int64{})
-		for {
-			if _, _, err := t.ReadRTP(); err != nil {
-				return
-			}
-			n.(*atomic.Int64).Add(1)
-		}
-	})
-	b.pc = pc
-	return nil
-}
-
-func (b *bot) sendAudio() {
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	var seq uint16
-	var ts uint32
-	burstStart := time.Now()
-	for range ticker.C {
-		if b.pc.ConnectionState() != webrtc.PeerConnectionStateConnected {
-			continue
-		}
-		level := b.level
-		if b.talk > 0 {
-			cycle := time.Since(burstStart) % (b.talk + b.pause)
-			if cycle >= b.talk {
-				level = 127 // silence
-			}
-		}
-		pkt := &rtp.Packet{
-			Header:  rtp.Header{Version: 2, PayloadType: 111, SequenceNumber: seq, Timestamp: ts},
-			Payload: opusSilence,
-		}
-		if id := b.audioLevelExtID(); id != 0 {
-			ext, _ := rtp.AudioLevelExtension{Level: level, Voice: level < 127}.Marshal()
-			pkt.Header.SetExtension(id, ext)
-		}
-		if err := b.mic.WriteRTP(pkt); err != nil {
-			log.Printf("write rtp: %v", err)
-		}
-		seq++
-		ts += 960
-	}
-}
-
-func (b *bot) audioLevelExtID() uint8 {
-	for _, t := range b.pc.GetTransceivers() {
-		if s := t.Sender(); s != nil && s.Track() == b.mic {
-			for _, e := range s.GetParameters().HeaderExtensions {
-				if e.URI == sdp.AudioLevelURI {
-					return uint8(e.ID)
-				}
-			}
-		}
-	}
-	return 0
-}
-
 func (b *bot) report() {
 	for range time.Tick(2 * time.Second) {
 		var parts []string
-		b.counts.Range(func(k, v any) bool {
-			parts = append(parts, fmt.Sprintf("%s=%d", b.name(k.(string)), v.(*atomic.Int64).Load()))
-			return true
-		})
+		for id, n := range b.voice.Counts() {
+			parts = append(parts, fmt.Sprintf("%s=%d", b.name(id), n))
+		}
 		if len(parts) > 0 {
 			sort.Strings(parts)
 			log.Printf("packets received: %s", strings.Join(parts, " "))
