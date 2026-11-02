@@ -62,6 +62,10 @@ func (h *UserHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.svc.Update(r.Context(), uc.UserID, req.Username, req.Email)
 	if err != nil {
+		if errors.Is(err, application.ErrEmailTaken) {
+			writeJSON(w, http.StatusBadRequest, errorResponse{"update failed", "UPDATE_FAILED"})
+			return
+		}
 		h.logger.Error("failed to update current user", zap.Error(err))
 		writeJSON(w, http.StatusInternalServerError, errorResponse{"internal server error", "INTERNAL_ERROR"})
 		return
@@ -114,6 +118,10 @@ func (h *UserHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.svc.Update(r.Context(), id, req.Username, req.Email)
 	if err != nil {
+		if errors.Is(err, application.ErrEmailTaken) {
+			writeJSON(w, http.StatusBadRequest, errorResponse{"update failed", "UPDATE_FAILED"})
+			return
+		}
 		if errors.Is(err, application.ErrUserNotFound) {
 			writeJSON(w, http.StatusNotFound, errorResponse{"user not found", "NOT_FOUND"})
 			return

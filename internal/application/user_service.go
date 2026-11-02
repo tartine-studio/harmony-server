@@ -47,11 +47,18 @@ func (s *UserService) Update(ctx context.Context, id, username, email string) (*
 		return nil, ErrUserNotFound
 	}
 
+	if email != "" && email != user.Email {
+		owner, err := s.repo.GetByEmail(ctx, email)
+		if err != nil {
+			return nil, fmt.Errorf("check email: %w", err)
+		}
+		if owner != nil {
+			return nil, ErrEmailTaken
+		}
+		user.Email = email
+	}
 	if username != "" {
 		user.Username = username
-	}
-	if email != "" {
-		user.Email = email
 	}
 	user.UpdatedAt = time.Now().UTC()
 
