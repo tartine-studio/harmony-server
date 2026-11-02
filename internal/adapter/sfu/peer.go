@@ -40,6 +40,7 @@ type peer struct {
 	pc        *webrtc.PeerConnection
 
 	connectTimer *time.Timer
+	muted        atomic.Bool // muted peers' audio is dropped, never forwarded
 	deafened     atomic.Bool // deafened peers receive nothing
 
 	speaking   atomic.Bool
@@ -58,7 +59,7 @@ type peer struct {
 	pending     bool       // another negotiation is needed once the answer arrives
 }
 
-func (s *SFU) newPeer(sessionID, userID, channelID string, deafened bool) (*peer, error) {
+func (s *SFU) newPeer(sessionID, userID, channelID string) (*peer, error) {
 	pc, err := s.api.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		return nil, fmt.Errorf("new peer connection: %w", err)
@@ -80,7 +81,6 @@ func (s *SFU) newPeer(sessionID, userID, channelID string, deafened bool) (*peer
 		pc:            pc,
 		subscriptions: make(map[string]*subscription),
 	}
-	p.deafened.Store(deafened)
 	p.fanout.Store(&[]fanoutTarget{})
 
 	pc.OnTrack(p.forward)
@@ -124,6 +124,11 @@ func (p *peer) forward(remote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver)
 			}
 			return
 		}
+		// Server-side guarantee: nothing leaves a muted mic, even if the client
+		// keeps sending (bug, race with the mute toggle...).
+		if p.muted.Load() {
+			continue
+		}
 		if levelExtID != 0 {
 			p.detectSpeech(pkt, levelExtID)
 		}
@@ -136,6 +141,12 @@ func (p *peer) forward(remote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver)
 			}
 		}
 	}
+}
+
+// apply sets the mute/deafen flags read by the forwarding loops.
+func (p *peer) apply(state domain.VoiceState) {
+	p.muted.Store(state.Muted())
+	p.deafened.Store(state.Deafened)
 }
 
 func (p *peer) detectSpeech(pkt *rtp.Packet, extID uint8) {

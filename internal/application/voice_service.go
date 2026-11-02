@@ -57,7 +57,7 @@ func (s *VoiceService) Join(ctx context.Context, userID, sessionID, channelID st
 
 	cur := s.byUser[userID]
 	if cur != nil && cur.SessionID == sessionID && cur.ChannelID == channelID {
-		if err := s.media.AddPeer(sessionID, userID, channelID, cur.Deafened); err != nil {
+		if err := s.media.AddPeer(*cur); err != nil {
 			s.removeLocked(cur)
 			return fmt.Errorf("restart voice peer: %w", err)
 		}
@@ -73,7 +73,7 @@ func (s *VoiceService) Join(ctx context.Context, userID, sessionID, channelID st
 	}
 
 	// Replaces this session's previous peer when moving between channels.
-	if err := s.media.AddPeer(sessionID, userID, channelID, next.Deafened); err != nil {
+	if err := s.media.AddPeer(*next); err != nil {
 		if cur != nil && cur.SessionID == sessionID {
 			s.removeLocked(cur) // its peer is gone
 		}
@@ -121,8 +121,8 @@ func (s *VoiceService) SetState(userID, sessionID string, selfMuted, deafened *b
 	if next == *cur {
 		return nil
 	}
-	if next.Deafened != cur.Deafened {
-		s.media.SetDeafened(sessionID, next.Deafened)
+	if next.Muted() != cur.Muted() || next.Deafened != cur.Deafened {
+		s.media.UpdatePeer(next)
 	}
 	stoppedSpeaking := next.Muted() && next.Speaking
 	if stoppedSpeaking {
@@ -236,5 +236,6 @@ func (s *VoiceService) removeLocked(st *domain.VoiceState) {
 	s.media.RemovePeer(st.SessionID)
 	left := *st
 	left.ChannelID = ""
+	left.Speaking = false
 	s.notifier.PublishVoiceState(left)
 }

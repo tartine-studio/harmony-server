@@ -68,7 +68,8 @@ func main() {
 	talk := flag.Duration("talk", 0, "with -speak: talk for this long, then pause (0 = talk continuously)")
 	pause := flag.Duration("pause", 2*time.Second, "with -talk: pause duration between talk bursts")
 	showSDP := flag.Bool("sdp", false, "print SDP offers/answers and ICE candidates (debugging)")
-	mute := flag.Bool("mute", false, "self-mute right after joining but keep sending audio (server must not report speaking)")
+	mute := flag.Bool("mute", false, "self-mute right after joining but keep sending audio (the server must drop it)")
+	unmuteAfter := flag.Duration("unmute-after", 0, "with -mute: unmute after this long (0 = stay muted)")
 	deafen := flag.Bool("deafen", false, "deafen right after joining (should then receive nothing)")
 	duration := flag.Duration("duration", 0, "exit after this long (0 = until Ctrl-C)")
 	flag.Parse()
@@ -109,6 +110,12 @@ func main() {
 	}
 	if *mute {
 		b.send("updateVoiceState", map[string]bool{"muted": true})
+		if *unmuteAfter > 0 {
+			time.AfterFunc(*unmuteAfter, func() {
+				log.Printf("unmuting")
+				b.send("updateVoiceState", map[string]bool{"muted": false})
+			})
+		}
 	}
 
 	go b.report()

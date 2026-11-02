@@ -208,13 +208,15 @@ func (s *SFU) Close() error {
 
 // AddPeer implements domain.VoiceMedia. An existing peer for the same session
 // is replaced (channel move or reconnect).
-func (s *SFU) AddPeer(sessionID, userID, channelID string, deafened bool) error {
+func (s *SFU) AddPeer(state domain.VoiceState) error {
+	sessionID, channelID := state.SessionID, state.ChannelID
 	s.RemovePeer(sessionID)
 
-	p, err := s.newPeer(sessionID, userID, channelID, deafened)
+	p, err := s.newPeer(sessionID, state.UserID, channelID)
 	if err != nil {
 		return err
 	}
+	p.apply(state)
 
 	s.mu.Lock()
 	room := s.rooms[channelID]
@@ -286,10 +288,10 @@ func (s *SFU) AddICECandidate(sessionID string, c domain.ICECandidate) error {
 	return nil
 }
 
-// SetDeafened implements domain.VoiceMedia: a deafened peer receives nothing.
-func (s *SFU) SetDeafened(sessionID string, deafened bool) {
-	if p := s.peer(sessionID); p != nil {
-		p.deafened.Store(deafened)
+// UpdatePeer implements domain.VoiceMedia.
+func (s *SFU) UpdatePeer(state domain.VoiceState) {
+	if p := s.peer(state.SessionID); p != nil {
+		p.apply(state)
 	}
 }
 

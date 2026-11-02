@@ -52,14 +52,17 @@ type ICECandidate struct {
 // VoiceMedia is the media plane port (the SFU): one peer per voice session.
 // Implementations must not call back into the application synchronously.
 type VoiceMedia interface {
-	// AddPeer creates the session's peer and sends it an offer. An existing
-	// peer for the same session is replaced.
-	AddPeer(sessionID, userID, channelID string, deafened bool) error
+	// AddPeer creates the peer for state.SessionID in state.ChannelID and sends
+	// it an offer, applying state's mute/deafen. An existing peer for the same
+	// session is replaced.
+	AddPeer(state VoiceState) error
 	RemovePeer(sessionID string)
 	HandleAnswer(sessionID, sdp string) error
 	AddICECandidate(sessionID string, candidate ICECandidate) error
-	// SetDeafened stops (or resumes) forwarding any audio to the session.
-	SetDeafened(sessionID string, deafened bool)
+	// UpdatePeer applies mute/deafen: a muted peer's audio is dropped (nothing
+	// leaves a muted mic, whatever the client sends), a deafened peer receives
+	// nothing.
+	UpdatePeer(state VoiceState)
 }
 
 // VoiceSignaler delivers server-initiated signaling to a single session.
