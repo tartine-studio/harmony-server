@@ -66,15 +66,17 @@ type Handler struct {
 	hub         *Hub
 	messageSvc  *application.MessageService
 	presenceSvc *application.PresenceService
+	voiceSvc    *application.VoiceService
 	tokenSvc    domain.TokenProvider
 	logger      *zap.Logger
 }
 
-func NewHandler(hub *Hub, messageSvc *application.MessageService, presenceSvc *application.PresenceService, tokenSvc domain.TokenProvider, logger *zap.Logger) *Handler {
+func NewHandler(hub *Hub, messageSvc *application.MessageService, presenceSvc *application.PresenceService, voiceSvc *application.VoiceService, tokenSvc domain.TokenProvider, logger *zap.Logger) *Handler {
 	return &Handler{
 		hub:         hub,
 		messageSvc:  messageSvc,
 		presenceSvc: presenceSvc,
+		voiceSvc:    voiceSvc,
 		tokenSvc:    tokenSvc,
 		logger:      logger,
 	}
@@ -111,13 +113,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := NewClient(h.hub, conn, claims.UserID, h.logger)
-	// Queue the snapshot before registering so later broadcasts arrive after it.
+	// Queue snapshots before registering so later broadcasts arrive after them.
 	client.SendJSON(presenceSnapshotFor(client.userID, h.presenceSvc.Snapshot(client.userID)))
+	client.SendJSON(voiceStateSnapshot(h.voiceSvc.Snapshot()))
 	h.hub.register <- client
 
 	go client.writePump()
 	go func() {
 		client.readPump(h.dispatch)
+		h.voiceSvc.Leave(client.userID, client.id)
 		h.presenceSvc.Disconnect(client.userID)
 	}()
 }
@@ -149,6 +153,12 @@ func (h *Handler) dispatch(client *Client, raw []byte) {
 		h.handleDeleteMessage(client, env)
 	case "presenceUpdate":
 		h.handlePresenceUpdate(client, env)
+	case "joinVoice":
+		h.handleJoinVoice(client, env)
+	case "leaveVoice":
+		h.voiceSvc.Leave(client.userID, client.id)
+	case "updateVoiceState":
+		h.handleUpdateVoiceState(client, env)
 	case "activity":
 		// Activity heartbeat: the Touch above is all it needs.
 	default:
@@ -248,6 +258,45 @@ func (h *Handler) handlePresenceUpdate(client *Client, env Envelope) {
 	if err := h.presenceSvc.SetInvisible(context.Background(), client.userID, *data.Invisible); err != nil {
 		h.logger.Error("failed to update presence via ws", zap.Error(err))
 		h.sendError(client, env.RequestID, "failed to update presence", "INTERNAL_ERROR")
+	}
+}
+
+func (h *Handler) handleJoinVoice(client *Client, env Envelope) {
+	var data joinVoiceData
+	if err := json.Unmarshal(env.Data, &data); err != nil || data.ChannelID == "" {
+		h.sendError(client, env.RequestID, "channelId is required", "VALIDATION_ERROR")
+		return
+	}
+
+	err := h.voiceSvc.Join(context.Background(), client.userID, client.id, data.ChannelID)
+	switch {
+	case err == nil:
+	case errors.Is(err, application.ErrChannelNotFound):
+		h.sendError(client, env.RequestID, "channel not found", "NOT_FOUND")
+	case errors.Is(err, application.ErrNotVoiceChannel):
+		h.sendError(client, env.RequestID, "not a voice channel", "NOT_VOICE_CHANNEL")
+	case errors.Is(err, application.ErrVoiceChannelFull):
+		h.sendError(client, env.RequestID, "voice channel is full", "VOICE_CHANNEL_FULL")
+	default:
+		h.logger.Error("failed to join voice", zap.Error(err))
+		h.sendError(client, env.RequestID, "failed to join voice", "INTERNAL_ERROR")
+	}
+}
+
+func (h *Handler) handleUpdateVoiceState(client *Client, env Envelope) {
+	var data updateVoiceStateData
+	if err := json.Unmarshal(env.Data, &data); err != nil || (data.Muted == nil && data.Deafened == nil) {
+		h.sendError(client, env.RequestID, "muted or deafened is required", "VALIDATION_ERROR")
+		return
+	}
+
+	if err := h.voiceSvc.SetState(client.userID, client.id, data.Muted, data.Deafened); err != nil {
+		if errors.Is(err, application.ErrNotInVoice) {
+			h.sendError(client, env.RequestID, "not in a voice channel", "NOT_IN_VOICE")
+			return
+		}
+		h.logger.Error("failed to update voice state", zap.Error(err))
+		h.sendError(client, env.RequestID, "failed to update voice state", "INTERNAL_ERROR")
 	}
 }
 

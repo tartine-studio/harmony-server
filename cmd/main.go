@@ -38,19 +38,21 @@ func main() {
 	userSvc := application.NewUserService(userRepo)
 	userHandler := httphandler.NewHandler(userSvc, logger)
 
+	hub := wshandler.NewHub(logger)
+	go hub.Run()
+
 	channelRepo := repository.NewChannelRepository(db)
-	channelSvc := application.NewChannelService(channelRepo)
+	voiceSvc := application.NewVoiceService(channelRepo, hub, cfg.VoiceMaxParticipants)
+	channelSvc := application.NewChannelService(channelRepo, voiceSvc)
 	channelHandler := httphandler.NewChannelHandler(channelSvc, logger)
 
 	messageRepo := repository.NewMessageRepository(db)
 	messageSvc := application.NewMessageService(messageRepo, channelRepo)
 	messageHandler := httphandler.NewMessageHandler(messageSvc, logger)
 
-	hub := wshandler.NewHub(logger)
-	go hub.Run()
 	presenceSvc := application.NewPresenceService(userRepo, hub, cfg.PresenceIdleTimeout, cfg.PresenceOfflineGrace)
 	go presenceSvc.Run(context.Background())
-	wsHandler := wshandler.NewHandler(hub, messageSvc, presenceSvc, jwtSvc, logger)
+	wsHandler := wshandler.NewHandler(hub, messageSvc, presenceSvc, voiceSvc, jwtSvc, logger)
 
 	router := httphandler.NewRouter(httphandler.Dependencies{
 		AuthHandler:    authHandler,

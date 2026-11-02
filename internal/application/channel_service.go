@@ -13,12 +13,19 @@ import (
 
 var ErrChannelNotFound = errors.New("channel not found")
 
-type ChannelService struct {
-	repo domain.ChannelRepository
+// ChannelDeletionListener reacts to a channel being deleted (e.g. voice kicks
+// everyone out of it).
+type ChannelDeletionListener interface {
+	ChannelDeleted(channelID string)
 }
 
-func NewChannelService(repo domain.ChannelRepository) *ChannelService {
-	return &ChannelService{repo: repo}
+type ChannelService struct {
+	repo     domain.ChannelRepository
+	onDelete ChannelDeletionListener
+}
+
+func NewChannelService(repo domain.ChannelRepository, onDelete ChannelDeletionListener) *ChannelService {
+	return &ChannelService{repo: repo, onDelete: onDelete}
 }
 
 func (s *ChannelService) Create(ctx context.Context, name string, channelType domain.ChannelType) (*domain.Channel, error) {
@@ -84,6 +91,9 @@ func (s *ChannelService) Delete(ctx context.Context, id string) error {
 	}
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return fmt.Errorf("delete channel: %w", err)
+	}
+	if s.onDelete != nil {
+		s.onDelete.ChannelDeleted(id)
 	}
 	return nil
 }

@@ -21,12 +21,23 @@ type Config struct {
 
 	PresenceIdleTimeout  time.Duration `env:"HARMONY_PRESENCE_IDLE_TIMEOUT"   envDefault:"5m"`
 	PresenceOfflineGrace time.Duration `env:"HARMONY_PRESENCE_OFFLINE_GRACE"  envDefault:"10s"`
+
+	VoiceUDPPort         int    `env:"HARMONY_VOICE_UDP_PORT"         envDefault:"50000"`
+	PublicIP             string `env:"HARMONY_PUBLIC_IP"`
+	VoiceMaxParticipants int    `env:"HARMONY_VOICE_MAX_PARTICIPANTS" envDefault:"25"`
 }
 
 func Load() (Config, error) {
 	var cfg Config
 	if err := env.Parse(&cfg); err != nil {
 		return Config{}, err
+	}
+
+	if cfg.VoiceMaxParticipants < 1 {
+		return Config{}, fmt.Errorf("HARMONY_VOICE_MAX_PARTICIPANTS must be >= 1, got %d", cfg.VoiceMaxParticipants)
+	}
+	if cfg.VoiceUDPPort < 1 || cfg.VoiceUDPPort > 65535 {
+		return Config{}, fmt.Errorf("HARMONY_VOICE_UDP_PORT must be a valid port, got %d", cfg.VoiceUDPPort)
 	}
 
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {

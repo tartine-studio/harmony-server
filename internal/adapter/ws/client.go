@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 )
@@ -12,11 +13,12 @@ const (
 	writeWait      = 10 * time.Second
 	pongWait       = 60 * time.Second
 	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 4096
+	maxMessageSize = 64 * 1024 // SDP answers grow with the number of voice participants
 	sendBufferSize = 256
 )
 
 type Client struct {
+	id     string // session ID, unique per WebSocket connection
 	hub    *Hub
 	conn   *websocket.Conn
 	send   chan []byte
@@ -31,6 +33,7 @@ type Client struct {
 
 func NewClient(hub *Hub, conn *websocket.Conn, userID string, logger *zap.Logger) *Client {
 	return &Client{
+		id:     uuid.NewString(),
 		hub:    hub,
 		conn:   conn,
 		send:   make(chan []byte, sendBufferSize),
