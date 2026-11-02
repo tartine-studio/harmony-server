@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -21,6 +22,11 @@ type Client struct {
 	send   chan []byte
 	userID string
 	logger *zap.Logger
+
+	// mu guards send against concurrent close: the hub closes it while other
+	// goroutines (readPump dispatch, ServeHTTP) may still be sending.
+	mu     sync.Mutex
+	closed bool
 }
 
 func NewClient(hub *Hub, conn *websocket.Conn, userID string, logger *zap.Logger) *Client {
@@ -86,10 +92,29 @@ func (c *Client) writePump() {
 	}
 }
 
-func (c *Client) SendJSON(data []byte) {
+// SendJSON queues data without blocking. It returns false if the client is
+// closed or its buffer is full. Safe to call concurrently with close.
+func (c *Client) SendJSON(data []byte) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return false
+	}
 	select {
 	case c.send <- data:
+		return true
 	default:
 		c.logger.Warn("client send buffer full", zap.String("userID", c.userID))
+		return false
+	}
+}
+
+// close closes the send channel exactly once; writePump then closes the conn.
+func (c *Client) close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed {
+		c.closed = true
+		close(c.send)
 	}
 }

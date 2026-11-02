@@ -30,17 +30,15 @@ func (h *Hub) Run() {
 		case client := <-h.unregister:
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
-				close(client.send)
+				client.close()
 				h.logger.Info("client disconnected", zap.String("userID", client.userID))
 			}
 
 		case message := <-h.broadcast:
 			for client := range h.clients {
-				select {
-				case client.send <- message:
-				default:
+				if !client.SendJSON(message) {
 					delete(h.clients, client)
-					close(client.send)
+					client.close()
 				}
 			}
 		}
