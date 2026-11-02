@@ -37,12 +37,12 @@ type deleteMessageData struct {
 }
 
 type messageEvent struct {
-	ID        string `json:"id"`
-	UserID    string `json:"userId"`
-	ChannelID string `json:"channelId"`
-	Content   string `json:"content"`
-	CreatedAt string `json:"createdAt"`
-	UpdatedAt string `json:"updatedAt"`
+	ID        string  `json:"id"`
+	UserID    *string `json:"userId"` // null when the author was deleted
+	ChannelID string  `json:"channelId"`
+	Content   string  `json:"content"`
+	CreatedAt string  `json:"createdAt"`
+	UpdatedAt string  `json:"updatedAt"`
 }
 
 type messageDeletedEvent struct {
@@ -362,12 +362,20 @@ func (h *Handler) sendError(client *Client, requestID, message, code string) {
 func messageToEvent(m *domain.Message) messageEvent {
 	return messageEvent{
 		ID:        m.ID,
-		UserID:    m.UserID,
+		UserID:    authorID(m.UserID),
 		ChannelID: m.ChannelID,
 		Content:   m.Content,
 		CreatedAt: m.CreatedAt.Format(time.RFC3339),
 		UpdatedAt: m.UpdatedAt.Format(time.RFC3339),
 	}
+}
+
+// authorID maps a deleted author (empty ID) to JSON null.
+func authorID(id string) *string {
+	if id == "" {
+		return nil
+	}
+	return &id
 }
 
 func mustMarshal(v any) json.RawMessage {

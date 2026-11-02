@@ -49,10 +49,12 @@ func (r *MessageRepository) GetByChannelID(ctx context.Context, channelID string
 	var messages []domain.Message
 	for rows.Next() {
 		var msg domain.Message
+		var userID sql.NullString
 		var createdAt, updatedAt string
-		if err := rows.Scan(&msg.ID, &msg.UserID, &msg.ChannelID, &msg.Content, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&msg.ID, &userID, &msg.ChannelID, &msg.Content, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
+		msg.UserID = userID.String
 		msg.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		msg.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
 		messages = append(messages, msg)
@@ -84,15 +86,17 @@ func (r *MessageRepository) Delete(ctx context.Context, id string) error {
 
 func (r *MessageRepository) scanMessage(row *sql.Row) (*domain.Message, error) {
 	var msg domain.Message
+	var userID sql.NullString
 	var createdAt, updatedAt string
 
-	err := row.Scan(&msg.ID, &msg.UserID, &msg.ChannelID, &msg.Content, &createdAt, &updatedAt)
+	err := row.Scan(&msg.ID, &userID, &msg.ChannelID, &msg.Content, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scan message: %w", err)
 	}
+	msg.UserID = userID.String
 
 	msg.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	msg.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)
