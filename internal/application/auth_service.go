@@ -85,7 +85,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*domai
 
 func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*domain.TokenPair, error) {
 	claims, err := s.tokenProvider.ValidateToken(refreshToken)
-	if err != nil {
+	if err != nil || claims.Type != domain.RefreshToken {
 		return nil, ErrInvalidToken
 	}
 
